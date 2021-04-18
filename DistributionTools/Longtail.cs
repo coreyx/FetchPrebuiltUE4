@@ -71,15 +71,50 @@ namespace DistributionTools
             }
         }
 
-        private static async Task<bool> RunLongtailCommand(GoogleOAuthFlow.ApplicationDefaultCredentialsFile? applicationDefaultCredentialsFile, string[] args)
+        public enum StorageProtocol
+        { 
+            None,
+            Local,
+            Google,
+            S3
+        }
+
+        private static async Task<bool> RunLongtailCommand(ApplicationConfiguration applicationConfiguration, StorageProtocol protocol, string[] args)
         {
             string longtailAppName = "longtail.exe";
 
             string arguments = string.Join(" ", args);
 
             ProcessStartInfo startInfo = new ProcessStartInfo { FileName = longtailAppName, Arguments = arguments, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            if (applicationDefaultCredentialsFile != null)
-                startInfo.EnvironmentVariables["GOOGLE_APPLICATION_CREDENTIALS"] = (string)applicationDefaultCredentialsFile;
+
+
+            switch (protocol)
+            {
+                case StorageProtocol.Google:
+                    if (!string.IsNullOrEmpty((string)applicationConfiguration.ApplicationDefaultCredentialsFile))
+                        startInfo.EnvironmentVariables["GOOGLE_APPLICATION_CREDENTIALS"] = (string)applicationConfiguration.ApplicationDefaultCredentialsFile;
+                    break;
+                case StorageProtocol.S3:
+                    if (!string.IsNullOrEmpty(applicationConfiguration.EndpointOverride))
+                    {
+                        startInfo.EnvironmentVariables["AWS_ENDPOINT_OVERRIDE"] = applicationConfiguration.EndpointOverride;
+                        Console.WriteLine("AWS_ENDPOINT_OVERRIDE: {0}", applicationConfiguration.EndpointOverride);
+                    }
+                    if (!string.IsNullOrEmpty(applicationConfiguration.RegionOverride))
+                    {
+                        startInfo.EnvironmentVariables["AWS_REGION"] = applicationConfiguration.RegionOverride;
+                        Console.WriteLine("AWS_REGION: {0}", applicationConfiguration.RegionOverride);
+                    }
+                    startInfo.EnvironmentVariables["AWS_ACCESS_KEY_ID"] = (string)applicationConfiguration.ClientID;
+                    startInfo.EnvironmentVariables["AWS_SECRET_ACCESS_KEY"] = (string)applicationConfiguration.ClientSecret;
+                    //Console.WriteLine("Key: {0}\nSecret: {1}", startInfo.EnvironmentVariables["AWS_ACCESS_KEY_ID"], startInfo.EnvironmentVariables["AWS_SECRET_ACCESS_KEY"]);
+                    break;
+                case StorageProtocol.Local:
+                    break;
+                case StorageProtocol.None:
+                default:
+                    throw new NotSupportedException("Unsupported protocol");
+            }
 
             Console.WriteLine($"Running command: {startInfo.FileName} {startInfo.Arguments}...");
 
@@ -94,24 +129,34 @@ namespace DistributionTools
             return result.ExitCode == 0;
         }
 
-        public static async Task<bool> UpsyncToGSBucket(GoogleOAuthFlow.ApplicationDefaultCredentialsFile applicationDefaultCredentialsFile, BlockStorageURI blockStorageURI, string localPath, VersionIndexURI versionIndexURI)
+        public static async Task<bool> UpsyncToGSBucket(ApplicationConfiguration applicationOAuthConfiguration, BlockStorageURI blockStorageURI, string localPath, VersionIndexURI versionIndexURI)
         {
-            return await RunLongtailCommand(applicationDefaultCredentialsFile, new string[] { "upsync", "--source-path", $"\"{localPath}\"", "--target-path", $"\"{(string)versionIndexURI}\"", "--storage-uri", $"\"{(string)blockStorageURI}\"" });
+            return await RunLongtailCommand(applicationOAuthConfiguration, StorageProtocol.Google, new string[] { "upsync", "--source-path", $"\"{localPath}\"", "--target-path", $"\"{(string)versionIndexURI}\"", "--storage-uri", $"\"{(string)blockStorageURI}\"" });
         }
 
-        public static async Task<bool> DownsyncFromGSBucket(GoogleOAuthFlow.ApplicationDefaultCredentialsFile applicationDefaultCredentialsFile, BlockStorageURI blockStorageURI, string localPath, VersionIndexURI versionIndexURI)
+        public static async Task<bool> DownsyncFromGSBucket(ApplicationConfiguration applicationOAuthConfiguration, BlockStorageURI blockStorageURI, string localPath, VersionIndexURI versionIndexURI)
         {
-            return await RunLongtailCommand(applicationDefaultCredentialsFile, new string[] { "downsync", "--source-path", $"\"{(string)versionIndexURI}\"", "--target-path", $"\"{localPath}\"", "--storage-uri", $"\"{(string)blockStorageURI}\"" });
+            return await RunLongtailCommand(applicationOAuthConfiguration, StorageProtocol.Google, new string[] { "downsync", "--source-path", $"\"{(string)versionIndexURI}\"", "--target-path", $"\"{localPath}\"", "--storage-uri", $"\"{(string)blockStorageURI}\"" });
+        }
+
+        public static async Task<bool> DownsyncFromS3Bucket(ApplicationConfiguration applicationConfiguration, BlockStorageURI blockStorageURI, string localPath, VersionIndexURI versionIndexURI)
+        {
+            return await RunLongtailCommand(applicationConfiguration, StorageProtocol.S3, new string[] { "downsync", "--source-path", $"\"{(string)versionIndexURI}\"", "--target-path", $"\"{localPath}\"", "--storage-uri", $"\"{(string)blockStorageURI}\"" });
+        }
+
+        public static async Task<bool> UpsyncToS3Bucket(ApplicationConfiguration applicationConfiguration, BlockStorageURI blockStorageURI, string localPath, VersionIndexURI versionIndexURI)
+        {
+            return await RunLongtailCommand(applicationConfiguration, StorageProtocol.S3, new string[] { "upsync", "--source-path", $"\"{localPath}\"", "--target-path", $"\"{(string)versionIndexURI}\"", "--storage-uri", $"\"{(string)blockStorageURI}\"" });
         }
 
         public static async Task<bool> UpsyncToLocalStore(BlockStorageURI blockStorageURI, string localPath, VersionIndexURI versionIndexURI)
         {
-            return await RunLongtailCommand(null, new string[] { "upsync", "--source-path", $"\"{localPath}\"", "--target-path", $"\"{(string)versionIndexURI}\"", "--storage-uri", $"\"{(string)blockStorageURI}\"" });
+            return await RunLongtailCommand(null, StorageProtocol.Local, new string[] { "upsync", "--source-path", $"\"{localPath}\"", "--target-path", $"\"{(string)versionIndexURI}\"", "--storage-uri", $"\"{(string)blockStorageURI}\"" });
         }
 
         public static async Task<bool> DownsyncFromLocalStore(BlockStorageURI blockStorageURI, string localPath, VersionIndexURI versionIndexURI)
         {
-            return await RunLongtailCommand(null, new string[] { "downsync", "--source-path", $"\"{(string)versionIndexURI}\"", "--target-path", $"\"{localPath}\"", "--storage-uri", $"\"{(string)blockStorageURI}\"" });
+            return await RunLongtailCommand(null, StorageProtocol.Local, new string[] { "downsync", "--source-path", $"\"{(string)versionIndexURI}\"", "--target-path", $"\"{localPath}\"", "--storage-uri", $"\"{(string)blockStorageURI}\"" });
         }
     }
 }

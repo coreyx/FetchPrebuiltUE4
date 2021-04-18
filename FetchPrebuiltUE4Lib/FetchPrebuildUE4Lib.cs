@@ -10,12 +10,14 @@ namespace FetchPrebuiltUE4Lib
 {
     public static class FetchPrebuiltUE4Lib
     {
-        private static readonly GoogleOAuthFlow.ApplicationDefaultCredentialsFile ApplicationDefaultCredentialsFile = new GoogleOAuthFlow.ApplicationDefaultCredentialsFile("application-default-credentials.json");
+        private static readonly ApplicationDefaultCredentialsFile ApplicationDefaultCredentialsFile = new ApplicationDefaultCredentialsFile("application-default-credentials.json");
 
         private struct Config
         {
             public OAuth.ClientID ClientID;
             public OAuth.ClientSecret ClientSecret;
+            public string EndpointOverride;
+            public string RegionOverride;
             public Longtail.BlockStorageURI BlockStorageURI;
             public Longtail.VersionIndexStorageURI VersionIndexStorageURI;
             public string UE4Folder;
@@ -39,14 +41,16 @@ namespace FetchPrebuiltUE4Lib
             }
         }
 
-        private static void Initialize(out Config config, out GoogleOAuthFlow.ApplicationOAuthConfiguration applicationOAuthConfiguration)
+        private static void Initialize(out Config config, out ApplicationConfiguration applicationConfiguration)
         {
             config = ReadConfig();
-            applicationOAuthConfiguration = new GoogleOAuthFlow.ApplicationOAuthConfiguration
+            applicationConfiguration = new ApplicationConfiguration
             {
                 ClientID = config.ClientID,
                 ClientSecret = config.ClientSecret,
-                ApplicationDefaultCredentialsFile = ApplicationDefaultCredentialsFile
+                ApplicationDefaultCredentialsFile = ApplicationDefaultCredentialsFile,
+                EndpointOverride = config.EndpointOverride,
+                RegionOverride = config.RegionOverride
             };
         }
 
@@ -75,11 +79,11 @@ namespace FetchPrebuiltUE4Lib
             rootCommand.Add(runPrerequisitesInstaller);
 
             Command clearAuth = new Command("clear-auth");
-            clearAuth.Handler = CommandHandler.Create(ClearAuth);
+            clearAuth.Handler = CommandHandler.Create(ClearGoogleUserAuth);
             rootCommand.Add(clearAuth);
 
             Command createUserAuth = new Command("create-user-auth");
-            createUserAuth.Handler = CommandHandler.Create(CreateUserAuth);
+            createUserAuth.Handler = CommandHandler.Create(CreateGoogleUserAuth);
             rootCommand.Add(createUserAuth);
 
             return rootCommand;
@@ -93,13 +97,21 @@ namespace FetchPrebuiltUE4Lib
             return await result;
         }
 
-        private static async Task<int> UpsyncWithAuthentication(Config config, GoogleOAuthFlow.ApplicationOAuthConfiguration applicationOAuthConfiguration, string folder, string package)
+        private static async Task<int> UpsyncWithAuthentication(Config config, ApplicationConfiguration applicationConfiguration, string folder, string package)
         {
             if (((string)config.BlockStorageURI).StartsWith("gs://"))
             {
-                await GoogleOAuthFlow.RefreshUserApplicationDefaultCredentials(applicationOAuthConfiguration);
+                await GoogleOAuthFlow.RefreshUserApplicationDefaultCredentials(applicationConfiguration);
 
-                if (!await Longtail.UpsyncToGSBucket(applicationOAuthConfiguration.ApplicationDefaultCredentialsFile, config.BlockStorageURI, folder, PackageNameToURI(config.VersionIndexStorageURI, package)))
+                if (!await Longtail.UpsyncToGSBucket(applicationConfiguration, config.BlockStorageURI, folder, PackageNameToURI(config.VersionIndexStorageURI, package)))
+                {
+                    Console.WriteLine("Tar operation failed.");
+                    return 1;
+                }
+            }
+            else if (((string)config.BlockStorageURI).StartsWith("s3://"))
+            {
+                if (!await Longtail.UpsyncToS3Bucket(applicationConfiguration, config.BlockStorageURI, folder, PackageNameToURI(config.VersionIndexStorageURI, package)))
                 {
                     Console.WriteLine("Tar operation failed.");
                     return 1;
@@ -119,18 +131,26 @@ namespace FetchPrebuiltUE4Lib
 
         private static async Task<int> UploadPackage(string folder, string package)
         {
-            Initialize(out Config config, out GoogleOAuthFlow.ApplicationOAuthConfiguration applicationOAuthConfiguration);
+            Initialize(out Config config, out ApplicationConfiguration applicationConfiguration);
 
-            return await UpsyncWithAuthentication(config, applicationOAuthConfiguration, folder, package);
+            return await UpsyncWithAuthentication(config, applicationConfiguration, folder, package);
         }
 
-        private static async Task<int> DownsyncWithAuthentication(Config config, GoogleOAuthFlow.ApplicationOAuthConfiguration applicationOAuthConfiguration, string folder, string package)
+        private static async Task<int> DownsyncWithAuthentication(Config config, ApplicationConfiguration applicationConfiguration, string folder, string package)
         {
             if (((string)config.BlockStorageURI).StartsWith("gs://"))
             {
-                await GoogleOAuthFlow.RefreshUserApplicationDefaultCredentials(applicationOAuthConfiguration);
+                await GoogleOAuthFlow.RefreshUserApplicationDefaultCredentials(applicationConfiguration);
 
-                if (!await Longtail.DownsyncFromGSBucket(applicationOAuthConfiguration.ApplicationDefaultCredentialsFile, config.BlockStorageURI, folder, PackageNameToURI(config.VersionIndexStorageURI, package)))
+                if (!await Longtail.DownsyncFromGSBucket(applicationConfiguration, config.BlockStorageURI, folder, PackageNameToURI(config.VersionIndexStorageURI, package)))
+                {
+                    Console.WriteLine("Untar operation failed.");
+                    return 1;
+                }
+            }
+            if (((string)config.BlockStorageURI).StartsWith("s3://"))
+            {
+                if (!await Longtail.DownsyncFromS3Bucket(applicationConfiguration, config.BlockStorageURI, folder, PackageNameToURI(config.VersionIndexStorageURI, package)))
                 {
                     Console.WriteLine("Untar operation failed.");
                     return 1;
@@ -150,9 +170,9 @@ namespace FetchPrebuiltUE4Lib
 
         private static async Task<int> DownloadPackage(string folder, string package)
         {
-            Initialize(out Config config, out GoogleOAuthFlow.ApplicationOAuthConfiguration applicationOAuthConfiguration);
+            Initialize(out Config config, out ApplicationConfiguration applicationConfiguration);
 
-            return await DownsyncWithAuthentication(config, applicationOAuthConfiguration, folder, package);
+            return await DownsyncWithAuthentication(config, applicationConfiguration, folder, package);
         }
 
         public struct UE4Version
@@ -192,7 +212,7 @@ namespace FetchPrebuiltUE4Lib
 
         private static async Task<int> UpdateLocalUE4Version()
         {
-            Initialize(out Config config, out GoogleOAuthFlow.ApplicationOAuthConfiguration applicationOAuthConfiguration);
+            Initialize(out Config config, out ApplicationConfiguration applicationConfiguration);
 
             const string installedUE4VersionFile = "InstalledUE4Version.json";
             const string desiredUE4VersionFile = "DesiredUE4Version.json";
@@ -204,7 +224,7 @@ namespace FetchPrebuiltUE4Lib
             {
                 Console.WriteLine($"Installing UE4 version {desiredUE4Version.BuildId}...");
 
-                int result = await DownsyncWithAuthentication(config, applicationOAuthConfiguration, Path.GetFullPath(config.UE4Folder), desiredUE4Version.BuildId);
+                int result = await DownsyncWithAuthentication(config, applicationConfiguration, Path.GetFullPath(config.UE4Folder), desiredUE4Version.BuildId);
 
                 if (result != 0)
                 {
@@ -229,21 +249,21 @@ namespace FetchPrebuiltUE4Lib
 
         private static async Task<int> RunPrerequisitesInstaller()
         {
-            Initialize(out Config config, out GoogleOAuthFlow.ApplicationOAuthConfiguration applicationOAuthConfiguration);
+            Initialize(out Config config, out ApplicationConfiguration applicationConfiguration);
             int result = await Prerequisites.RunPrerequisitesInstaller(config.UE4Folder);
             return result;
         }
 
-        private static void ClearAuth()
+        private static void ClearGoogleUserAuth()
         {
             GoogleOAuthFlow.RemoveApplicationDefaultCredentials(ApplicationDefaultCredentialsFile);
         }
 
-        private static async Task CreateUserAuth()
+        private static async Task CreateGoogleUserAuth()
         {
-            Initialize(out _, out GoogleOAuthFlow.ApplicationOAuthConfiguration applicationOAuthConfiguration);
+            Initialize(out _, out ApplicationConfiguration applicationConfiguration);
 
-            await GoogleOAuthFlow.CreateUserApplicationDefaultCredentials(applicationOAuthConfiguration);
+            await GoogleOAuthFlow.CreateUserApplicationDefaultCredentials(applicationConfiguration);
         }
     }
 }

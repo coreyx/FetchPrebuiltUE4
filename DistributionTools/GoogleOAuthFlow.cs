@@ -14,34 +14,6 @@ namespace DistributionTools
 {
     public static class GoogleOAuthFlow
     {
-        public struct ApplicationDefaultCredentialsFile
-        {
-            [JsonProperty]
-            private string ApplicationDefaultCredentialsFile_;
-
-            public ApplicationDefaultCredentialsFile(string applicationDefaultCredentialsFile)
-            {
-                ApplicationDefaultCredentialsFile_ = applicationDefaultCredentialsFile;
-            }
-
-            public static explicit operator string(ApplicationDefaultCredentialsFile applicationDefaultCredentialsFile)
-            {
-                return applicationDefaultCredentialsFile.ApplicationDefaultCredentialsFile_;
-            }
-
-            public override string ToString()
-            {
-                return ApplicationDefaultCredentialsFile_;
-            }
-        }
-
-        public struct ApplicationOAuthConfiguration
-        {
-            public OAuth.ClientID ClientID;
-            public OAuth.ClientSecret ClientSecret;
-            public ApplicationDefaultCredentialsFile ApplicationDefaultCredentialsFile;
-        }
-
         // client configuration
         const string authorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
         const string tokenEndpoint = "https://www.googleapis.com/oauth2/v4/token";
@@ -241,7 +213,7 @@ namespace DistributionTools
         }
 
 
-        public static async Task<AuthorizedUserApplicationDefaultCredentials> DoEndUserOAuthFlow(ApplicationOAuthConfiguration applicationOAuthConfiguration)
+        public static async Task<AuthorizedUserApplicationDefaultCredentials> DoEndUserOAuthFlow(ApplicationConfiguration applicationOAuthConfiguration)
         {
             OAuth.RefreshToken refreshToken = await RefreshLoginInteractive(applicationOAuthConfiguration);
             AuthorizedUserApplicationDefaultCredentials authorizedUserApplicationDefaultCredentials = new AuthorizedUserApplicationDefaultCredentials(applicationOAuthConfiguration.ClientID, applicationOAuthConfiguration.ClientSecret, refreshToken);
@@ -292,7 +264,7 @@ namespace DistributionTools
             catch (FileNotFoundException) { }
         }
 
-        public static async Task CreateUserApplicationDefaultCredentials(ApplicationOAuthConfiguration applicationOAuthConfiguration)
+        public static async Task CreateUserApplicationDefaultCredentials(ApplicationConfiguration applicationOAuthConfiguration)
         {
             RemoveApplicationDefaultCredentials(applicationOAuthConfiguration.ApplicationDefaultCredentialsFile);
 
@@ -301,7 +273,7 @@ namespace DistributionTools
             WriteApplicationDefaultCredentials(applicationDefaultCredentials, applicationOAuthConfiguration.ApplicationDefaultCredentialsFile);
         }
 
-        public static async Task<bool> RefreshUserApplicationDefaultCredentials(ApplicationOAuthConfiguration applicationOAuthConfiguration)
+        public static async Task<bool> RefreshUserApplicationDefaultCredentials(ApplicationConfiguration applicationOAuthConfiguration)
         {
             ApplicationDefaultCredentials applicationDefaultCredentials = ReadApplicationDefaultCredentials(applicationOAuthConfiguration.ApplicationDefaultCredentialsFile);
             if (applicationDefaultCredentials.Content == null)
@@ -340,7 +312,7 @@ namespace DistributionTools
             return port;
         }
 
-        private static async Task<OAuth.AccessToken> RefreshAccessToken(OAuth.RefreshToken refreshToken, ApplicationOAuthConfiguration applicationOAuthConfiguration)
+        private static async Task<OAuth.AccessToken> RefreshAccessToken(OAuth.RefreshToken refreshToken, ApplicationConfiguration applicationOAuthConfiguration)
         {
             output("Refreshing access token...");
 
@@ -401,7 +373,7 @@ namespace DistributionTools
             return default(OAuth.AccessToken);
         }
 
-        private static async Task<OAuth.RefreshToken> RefreshLoginInteractive(ApplicationOAuthConfiguration applicationOAuthConfiguration)
+        private static async Task<OAuth.RefreshToken> RefreshLoginInteractive(ApplicationConfiguration applicationOAuthConfiguration)
         {
             string[] scopes = new string[] { "openid", "profile", "https://www.googleapis.com/auth/devstorage.full_control" };
 
@@ -524,7 +496,7 @@ namespace DistributionTools
             public OAuth.AccessToken AccessToken;
         }
 
-        private static async Task<RefreshTokenAndAccessToken> PerformCodeExchange(ApplicationOAuthConfiguration applicationOAuthConfiguration, RedirectURI redirectURI, AuthorizationCode authorizationCode, CodeVerifier codeVerifier)
+        private static async Task<RefreshTokenAndAccessToken> PerformCodeExchange(ApplicationConfiguration applicationOAuthConfiguration, RedirectURI redirectURI, AuthorizationCode authorizationCode, CodeVerifier codeVerifier)
         {
             output("Exchanging code for tokens...");
 
